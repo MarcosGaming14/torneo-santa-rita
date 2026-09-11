@@ -1,0 +1,16 @@
+{
+  "name": "Campeonato Santa Rita 2026",
+  "short_name": "Santa Rita 2026",
+  "description": "App oficial del Campeonato Santa Rita 2026",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#080B11",
+  "theme_color": "#080B11",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
