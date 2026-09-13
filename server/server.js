@@ -47,10 +47,26 @@ app.get('/api/torneo', (req, res) => {
 
 // 3. Guardar o actualizar un resultado
 app.post('/api/resultado', (req, res) => {
-  const { matchId, home, away, scorers } = req.body;
+  const { matchId, home, away, scorers, cards } = req.body;
   if (!matchId || !Number.isFinite(home) || !Number.isFinite(away)) {
     return res.status(400).json({ error: 'Datos inválidos' });
   }
+  const data = readData();
+  data.results[matchId] = [home, away];
+  if (scorers && (scorers.home || scorers.away)) {
+    data.scorers[matchId] = scorers;
+  } else {
+    delete data.scorers[matchId];
+  }
+  if (cards && (cards.homeYellow || cards.homeRed || cards.awayYellow || cards.awayRed)) {
+    if (!data.cards) data.cards = {};
+    data.cards[matchId] = cards;
+  } else {
+    if (data.cards) delete data.cards[matchId];
+  }
+  writeData(data);
+  res.json({ ok: true, data });
+});
 
   const data = readData();
   data.results[matchId] = [home, away];
@@ -66,6 +82,7 @@ app.delete('/api/resultado/:matchId', (req, res) => {
   const data = readData();
   delete data.results[req.params.matchId];
   delete data.scorers[req.params.matchId];
+  if (data.cards) delete data.cards[req.params.matchId];
   writeData(data);
   res.json({ ok: true, data });
 });
