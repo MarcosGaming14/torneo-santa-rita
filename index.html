@@ -707,22 +707,53 @@ function openTeamDetail(teamId){
 
 function setCategory(id){if(!catById(id))return;state.currentCategory=id;save();render();}
 function setTab(id){state.currentTab=id;save();render();}
-function saveResult(matchId){
+async function saveResult(matchId){
   const h=parseInt(document.getElementById('score-home').value,10);
   const a=parseInt(document.getElementById('score-away').value,10);
   if(!Number.isFinite(h)||!Number.isFinite(a)||h<0||a<0){toast('Marcador inválido','err');return;}
   if(h>99||a>99){toast('Máximo 99 goles','err');return;}
-  state.results[matchId]=[h,a];
+
   const sch=document.getElementById('scorers-home').value.trim();
   const sca=document.getElementById('scorers-away').value.trim();
+
+  // 1. Guardar localmente (para funcionar sin internet)
+  state.results[matchId]=[h,a];
   if(sch||sca)state.scorers[matchId]={home:sch,away:sca};
   else delete state.scorers[matchId];
-  save();closeSheet();render();toast('Resultado guardado','ok');
+  save();closeSheet();render();
+  toast('Guardado localmente','ok');
+
+  // 2. Enviar al servidor (para que todos lo vean)
+  try {
+    await fetch(`${API_URL}/api/resultado`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        matchId,
+        home: h,
+        away: a,
+        scorers: { home: sch, away: sca }
+      })
+    });
+    toast('Sincronizado con la nube','ok');
+  } catch (e) {
+    console.warn('Sin conexión al servidor', e);
+    toast('Guardado solo localmente','err');
+  }
 }
-function deleteResult(matchId){
+async function deleteResult(matchId){
   if(!state.results[matchId])return;
-  delete state.results[matchId];delete state.scorers[matchId];
-  save();closeSheet();render();toast('Resultado eliminado');
+  delete state.results[matchId];
+  delete state.scorers[matchId];
+  save();closeSheet();render();
+  toast('Resultado eliminado localmente');
+
+  try {
+    await fetch(`${API_URL}/api/resultado/${matchId}`, { method: 'DELETE' });
+    toast('Eliminado en la nube','ok');
+  } catch (e) {
+    toast('Eliminado solo localmente','err');
+  }
 }
 async function shareTournament(){
   const base=(state.tournament.publicUrl||PUBLIC_URL).trim().replace(/\/$/,'');
@@ -863,9 +894,27 @@ function bindEvents(){
     }
   });
 }
-function init(){load();save();render();bindEvents();}
-init();
-})();
+
+  async function loadFromServer(){
+  try{
+    const r = await fetch(`${API_URL}/api/torneo`);
+    if(!r.ok) return;
+    const data = await r.json();
+    if(data.results) state.results = data.results;
+    if(data.scorers) state.scorers = data.scorers;
+    save();
+    render();
+    console.log('Datos sincronizados desde el servidor');
+  }catch(e){
+    console.warn('No se pudo conectar al servidor, usando datos locales', e);
+  }
+}
+function init(){
+  load();
+  render();
+  bindEvents();
+  loadFromServer(); // <-- Añade esta línea
+}
 </script>
 </body>
 </html>
