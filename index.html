@@ -100,6 +100,19 @@ body{display:flex;justify-content:center}
 .legend i{width:8px;height:8px;border-radius:50%}
 .legend .g{background:var(--primary);box-shadow:0 0 8px var(--primary)}
 .legend .r{background:var(--danger)}
+.top-list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.top-item{display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border);font-size:13.5px}
+.top-item:last-child{border-bottom:none}
+.top-pos{font-weight:800;font-size:12.5px;color:var(--text-3);text-align:center}
+.top-pos.gold{color:var(--gold);font-size:14px}
+.top-pos.silver{color:var(--silver);font-size:14px}
+.top-pos.bronze{color:var(--bronze);font-size:14px}
+.top-info{display:flex;flex-direction:column;min-width:0}
+.top-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-team{font-size:10.5px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-top:1px}
+.top-value{font-weight:800;font-size:16px;color:var(--primary);text-align:right;font-variant-numeric:tabular-nums}
+.top-value.neutral{color:var(--text)}
+.top-empty{text-align:center;padding:26px 20px;color:var(--text-3);font-size:13px;font-weight:600}
 .day-group{margin-bottom:18px}
 .day-head{display:flex;align-items:center;gap:10px;padding:6px 4px 10px}
 .day-head .line{flex:1;height:1px;background:var(--border-2)}
@@ -183,6 +196,8 @@ body{display:flex;justify-content:center}
 .scorers-input::placeholder{color:var(--text-3);font-weight:500}
 .scorers-team-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
 .scorers-team-name{font-size:12.5px;font-weight:800}
+.pin-input{width:100%;padding:14px;background:var(--surface-2);border:2px solid var(--border-2);border-radius:12px;color:var(--text);font-size:24px;font-weight:800;text-align:center;letter-spacing:.3em;outline:none;transition:all .15s;font-variant-numeric:tabular-nums}
+.pin-input:focus{border-color:var(--primary);background:var(--primary-soft);box-shadow:0 0 0 4px rgba(0,230,118,.12)}
 .detail-team{display:flex;flex-direction:column;align-items:center;gap:10px;margin:6px 0 18px;text-align:center}
 .detail-team-name{font-size:19px;font-weight:800}
 .detail-team-city{font-size:12px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
@@ -231,9 +246,11 @@ body{display:flex;justify-content:center}
 (function(){
 'use strict';
 
-const STORAGE_KEY='santa_rita_2026_v6';
+const STORAGE_KEY='santa_rita_2026_v7';
+const OLD_KEYS=['santa_rita_2026_v6','santa_rita_2026_v5','santa_rita_2026_v4','santa_rita_2026_v3','santa_rita_2026_v2','santa_rita_2026_v1'];
 const PUBLIC_URL='https://campeonato-santa-rita-2026.netlify.app';
-const API_URL = 'https://torneo-santa-rita.onrender.com'; // <-- Añade esta línea
+const API_URL='https://torneo-santa-rita.onrender.com';
+const DEFAULT_PIN='2026';
 const TOURNAMENT_DEFAULT={name:'Campeonato Santa Rita 2026',season:'2026',status:'En curso',publicUrl:PUBLIC_URL};
 const CATEGORIES=[
   {id:'cat_11_14',label:'11–14',pill:'11–14'},
@@ -330,6 +347,7 @@ function defaultState(){return{
   currentCategory:'cat_11_14',
   currentTab:'inicio',
   isAdmin:false,
+  adminPin:null,
   results:{},
   scorers:{},
   teams:JSON.parse(JSON.stringify(DEFAULT_TEAMS)),
@@ -338,39 +356,81 @@ function defaultState(){return{
 let state=defaultState();
 
 /* ============================================================
-   LOAD — SIEMPRE refresca partidos y equipos desde el código fuente
-   Conserva solo los resultados y goleadores cuyos IDs sigan existiendo
+   LOAD con migración desde versiones viejas
 ============================================================ */
 function load(){
   try{
-    const raw=localStorage.getItem(STORAGE_KEY);
+    let raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw){
+      for(const k of OLD_KEYS){
+        const old=localStorage.getItem(k);
+        if(old){ raw=old; console.log('Migrando datos desde',k); break; }
+      }
+    }
     if(raw){
       const saved=JSON.parse(raw);
-      state={...state,...saved};
-      if(!state.tournament)state.tournament={...TOURNAMENT_DEFAULT};
-      if(!state.scorers)state.scorers={};
-      if(!state.tournament.publicUrl)state.tournament.publicUrl=PUBLIC_URL;
+      // Conservar solo lo importante (resultados, goleadores, torneo, pin)
+      if(saved.tournament) state.tournament={...TOURNAMENT_DEFAULT,...saved.tournament};
+      if(saved.results) state.results=saved.results;
+      if(saved.scorers) state.scorers=saved.scorers;
+      if(saved.adminPin) state.adminPin=saved.adminPin;
+      if(saved.currentCategory) state.currentCategory=saved.currentCategory;
     }
-    /* SIEMPRE refresca partidos y equipos desde el código fuente */
+    // Siempre refresca partidos y equipos desde el código fuente
     state.matches=JSON.parse(JSON.stringify(DEFAULT_MATCHES));
     state.teams=JSON.parse(JSON.stringify(DEFAULT_TEAMS));
-    /* Conserva solo resultados cuyos IDs aún existen */
+    // Limpia resultados de partidos que ya no existen
     const validIds=new Set(state.matches.map(m=>m.id));
     const newResults={};
-    for(const id in state.results){
-      if(validIds.has(id)) newResults[id]=state.results[id];
-    }
+    for(const id in state.results){ if(validIds.has(id)) newResults[id]=state.results[id]; }
     state.results=newResults;
-    /* Igual para goleadores */
     const newScorers={};
-    for(const id in state.scorers){
-      if(validIds.has(id)) newScorers[id]=state.scorers[id];
-    }
+    for(const id in state.scorers){ if(validIds.has(id)) newScorers[id]=state.scorers[id]; }
     state.scorers=newScorers;
+    if(!state.tournament.publicUrl) state.tournament.publicUrl=PUBLIC_URL;
   }catch(e){console.warn('load failed',e);}
 }
 function save(){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state));}catch(e){}}
 
+/* ============================================================
+   SINCRONIZACIÓN CON BACKEND
+============================================================ */
+async function loadFromServer(){
+  try{
+    const r=await fetch(`${API_URL}/api/torneo`);
+    if(!r.ok) return false;
+    const data=await r.json();
+    if(data.results) state.results=data.results;
+    if(data.scorers) state.scorers=data.scorers;
+    save();
+    render();
+    console.log('✓ Datos sincronizados del servidor');
+    return true;
+  }catch(e){
+    console.warn('Backend no disponible',e);
+    return false;
+  }
+}
+
+async function pushResultToServer(matchId,home,away,scorers){
+  const r=await fetch(`${API_URL}/api/resultado`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({matchId,home,away,scorers})
+  });
+  if(!r.ok) throw new Error('Error al guardar en el servidor');
+  return await r.json();
+}
+
+async function deleteResultFromServer(matchId){
+  const r=await fetch(`${API_URL}/api/resultado/${matchId}`,{method:'DELETE'});
+  if(!r.ok) throw new Error('Error al eliminar en el servidor');
+  return await r.json();
+}
+
+/* ============================================================
+   HELPERS
+============================================================ */
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const catById=id=>CATEGORIES.find(c=>c.id===id);
@@ -386,15 +446,9 @@ const shortName=t=>t.name;
 const getTeams=catId=>state.teams[catId]||[];
 const getMatches=(catId,phase)=>state.matches.filter(m=>m.categoryId===catId&&(!phase||m.phase===phase));
 
-function encodeShareData(obj){
-  try{
-    const json=JSON.stringify(obj);
-    const bytes=new TextEncoder().encode(json);
-    let bin='';bytes.forEach(b=>bin+=String.fromCharCode(b));
-    return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  }catch(e){return '';}
-}
-
+/* ============================================================
+   CÁLCULOS
+============================================================ */
 function computeStandings(catId,phase){
   const teams=getTeams(catId);
   const matches=getMatches(catId,phase).filter(m=>state.results[m.id]);
@@ -412,9 +466,53 @@ function computeStandings(catId,phase){
   arr.sort((a,b)=>b.pts-a.pts||b.dg-a.dg||b.gf-a.gf||0);
   return arr;
 }
+
+/* Parser de goleadores: entiende "Juan 23'", "Juan (2)", "Juan x2" */
+function parseScorersText(text,teamId,goals){
+  if(!text) return;
+  const items=text.split(/[,;]/).map(s=>s.trim()).filter(Boolean);
+  for(let item of items){
+    let count=1;
+    const mult=item.match(/^(.+?)\s*(?:\((\d+)\)|[xX×](\d+))\s*$/);
+    if(mult){
+      item=mult[1].trim();
+      count=parseInt(mult[2]||mult[3])||1;
+    }
+    // Quitar minuto al final: "23'" o "23"
+    let name=item.replace(/\s+\d+[''`]?\s*$/,'').trim();
+    name=name.replace(/[''`]$/,'').trim();
+    if(!name) continue;
+    const key=name.toLowerCase();
+    if(!goals[key]) goals[key]={name,teamId,goals:0};
+    goals[key].goals+=count;
+  }
+}
+
+function computeTopScorers(catId){
+  const goals={};
+  const matches=getMatches(catId,'fase1').filter(m=>state.results[m.id]);
+  for(const m of matches){
+    const sc=state.scorers[m.id];
+    if(!sc) continue;
+    if(sc.home) parseScorersText(sc.home,m.homeId,goals);
+    if(sc.away) parseScorersText(sc.away,m.awayId,goals);
+  }
+  return Object.values(goals).sort((a,b)=>b.goals-a.goals||a.name.localeCompare(b.name));
+}
+
+function computeBestDefense(catId){
+  const table=computeStandings(catId,'fase1');
+  return [...table]
+    .filter(t=>t.pj>0)
+    .sort((a,b)=>a.gc-b.gc||b.pj-a.pj||b.pts-a.pts);
+}
+
 function nextMatch(catId){return getMatches(catId).filter(m=>!state.results[m.id]).sort((a,b)=>a.dateKey.localeCompare(b.dateKey)||a.time.localeCompare(b.time))[0]||null;}
 function lastResult(catId){return getMatches(catId).filter(m=>state.results[m.id]).sort((a,b)=>b.dateKey.localeCompare(a.dateKey)||b.time.localeCompare(a.time))[0]||null;}
 
+/* ============================================================
+   RENDER
+============================================================ */
 function render(){renderBrand();renderCatTabs();renderTabbar();renderScreen();}
 function renderBrand(){$('#brand-title').textContent=state.tournament.name;$('#brand-sub').textContent='Temporada '+state.tournament.season+' · '+state.tournament.status;}
 function renderCatTabs(){$('#cat-tabs').innerHTML=CATEGORIES.map(c=>`<button class="cat-tab ${c.id===state.currentCategory?'active':''}" data-action="set-cat" data-id="${c.id}">${esc(c.pill)}</button>`).join('');}
@@ -482,12 +580,62 @@ function renderMiniScore(m){
 function renderTabla(){
   const cat=currentCat();const catId=cat.id;const isFem=catId==='cat_fem';
   const hasResults=getMatches(catId,'fase1').some(m=>state.results[m.id]);
+
   let html=renderStandingsTable(catId,'fase1');
   if(hasResults){
     html+=`<div class="legend"><span><i class="g"></i>${isFem?'Top 4 clasifican':'Top 3 clasifican'}</span><span><i class="r"></i>Eliminado</span></div>`;
   }
+
+  // Tabla de goleadores
+  const topScorers=computeTopScorers(catId);
+  html+=`<div class="section-title">🏆 Goleadores</div>`;
+  if(topScorers.length){
+    html+=`<div class="top-list">`;
+    topScorers.slice(0,15).forEach((s,i)=>{
+      const team=getTeam(s.teamId);
+      const posClass=i===0?'gold':i===1?'silver':i===2?'bronze':'';
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+      html+=`<div class="top-item">
+        <div class="top-pos ${posClass}">${medal}</div>
+        <div class="top-info">
+          <div class="top-name">${esc(s.name)}</div>
+          <div class="top-team">${esc(team.name)}</div>
+        </div>
+        <div class="top-value">${s.goals}</div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }else{
+    html+=`<div class="top-list"><div class="top-empty">Sin goles registrados todavía.</div></div>`;
+  }
+
+  // Tabla valla menos vencida
+  const bestDefense=computeBestDefense(catId);
+  html+=`<div class="section-title">🛡️ Valla menos vencida</div>`;
+  if(bestDefense.length){
+    html+=`<div class="top-list">`;
+    bestDefense.slice(0,10).forEach((s,i)=>{
+      const team=getTeam(s.teamId);
+      const posClass=i===0?'gold':i===1?'silver':i===2?'bronze':'';
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':(i+1);
+      const avg=s.pj?(s.gc/s.pj).toFixed(2):'0.00';
+      html+=`<div class="top-item">
+        <div class="top-pos ${posClass}">${medal}</div>
+        <div class="top-info">
+          <div class="top-name">${esc(team.name)}</div>
+          <div class="top-team">${s.pj} PJ · ${avg} prom.</div>
+        </div>
+        <div class="top-value neutral">${s.gc} <span style="font-size:11px;color:var(--text-3);font-weight:600">GC</span></div>
+      </div>`;
+    });
+    html+=`</div>`;
+  }else{
+    html+=`<div class="top-list"><div class="top-empty">Sin datos todavía.</div></div>`;
+  }
+
   return html;
 }
+
 function renderStandingsTable(catId,phase){
   const table=computeStandings(catId,phase);const isFem=catId==='cat_fem';const qualifies=isFem?4:3;
   let html=`<div class="standings-scroll"><div class="standings-table">
@@ -581,29 +729,34 @@ function renderEquipos(){
 function renderMas(){
   const t=state.tournament;let html='';
   if(state.isAdmin){
-    html+=`<div class="admin-banner"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><div class="row-text"><div class="row-title">Modo organizador activo</div><div class="row-sub">Puedes registrar resultados y editar equipos</div></div></div>`;
+    html+=`<div class="admin-banner"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><div class="row-text"><div class="row-title">Modo organizador activo</div><div class="row-sub">Protegido con PIN</div></div></div>`;
   }
   html+=`<div class="section-title">Compartir</div>
   <div class="card">
-    <div class="row-item pressable" data-action="share"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></div><div class="row-text"><div class="row-title">Compartir resultados</div><div class="row-sub">Enviar tabla y partidos por WhatsApp</div></div><div class="row-chev">›</div></div>
-    <div class="row-item pressable" data-action="copy-link"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></div><div class="row-text"><div class="row-title">Copiar enlace público</div><div class="row-sub">Solo lectura · tabla y resultados</div></div><div class="row-chev">›</div></div>
+    <div class="row-item pressable" data-action="share"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></div><div class="row-text"><div class="row-title">Compartir resultados</div><div class="row-sub">Link fijo · siempre actualizado</div></div><div class="row-chev">›</div></div>
+    <div class="row-item pressable" data-action="copy-link"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></div><div class="row-text"><div class="row-title">Copiar enlace</div><div class="row-sub">${esc(t.publicUrl||'')}/torneo.html</div></div><div class="row-chev">›</div></div>
   </div>`;
   html+=`<div class="section-title">Organizador</div>
   <div class="card">
-    <div class="row-item" data-action="toggle-admin"><div class="row-icon warn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><div class="row-text"><div class="row-title">Modo organizador</div><div class="row-sub">${state.isAdmin?'Activado':'Desactivado'}</div></div><div class="switch ${state.isAdmin?'on':''}"></div></div>
+    <div class="row-item" data-action="toggle-admin"><div class="row-icon warn"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div><div class="row-text"><div class="row-title">Modo organizador</div><div class="row-sub">${state.isAdmin?'Activado':'Protegido con PIN'}</div></div><div class="switch ${state.isAdmin?'on':''}"></div></div>
     ${state.isAdmin?`
     <div class="row-item pressable" data-action="edit-tournament"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div><div class="row-text"><div class="row-title">Editar información</div><div class="row-sub">Nombre, temporada, estado y URL</div></div><div class="row-chev">›</div></div>
+    <div class="row-item pressable" data-action="change-pin"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg></div><div class="row-text"><div class="row-title">Cambiar PIN</div><div class="row-sub">Modifica el código de acceso</div></div><div class="row-chev">›</div></div>
     <div class="row-item pressable" data-action="open-teams-admin"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8.5-8 9-4.5-.5-8-4-8-9V6z"/></svg></div><div class="row-text"><div class="row-title">Gestionar equipos</div><div class="row-sub">${getTeams(state.currentCategory).length} equipos en ${currentCat().label}</div></div><div class="row-chev">›</div></div>
-    <div class="row-item pressable" data-action="reset-tournament"><div class="row-icon" style="color:var(--danger)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></div><div class="row-text"><div class="row-title">Reiniciar todos los datos</div><div class="row-sub">Borra resultados y equipos personalizados</div></div><div class="row-chev">›</div></div>`:''}
+    <div class="row-item pressable" data-action="sync-now"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></div><div class="row-text"><div class="row-title">Sincronizar con servidor</div><div class="row-sub">Descargar últimos datos</div></div><div class="row-chev">›</div></div>
+    <div class="row-item pressable" data-action="reset-tournament"><div class="row-icon" style="color:var(--danger)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></div><div class="row-text"><div class="row-title">Reiniciar todos los datos</div><div class="row-sub">Borra resultados locales y de la nube</div></div><div class="row-chev">›</div></div>`:''}
   </div>`;
   html+=`<div class="section-title">Información</div>
   <div class="card">
     <div class="row-item"><div class="row-icon gold"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4"/><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg></div><div class="row-text"><div class="row-title">${esc(t.name)}</div><div class="row-sub">Temporada ${esc(t.season)} · ${esc(t.status)}</div></div></div>
-    <div class="row-item"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></div><div class="row-text"><div class="row-title">Versión 1.0</div><div class="row-sub">Aplicación oficial del campeonato</div></div></div>
+    <div class="row-item"><div class="row-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg></div><div class="row-text"><div class="row-title">Versión 1.0</div><div class="row-sub">Con backend en la nube</div></div></div>
   </div>`;
   return html;
 }
 
+/* ============================================================
+   SHEET
+============================================================ */
 let _sheetHistoryPushed=false,_sheetSwipeBound=false;
 function openSheet(innerHtml){
   const root=$('#modal-root');
@@ -625,6 +778,9 @@ function initSheetSwipe(){
   root.addEventListener('touchend',()=>{if(!dragging||!sheet)return;dragging=false;sheet.classList.remove('dragging');if(currentY>110){sheet.style.transform='';closeSheet();}else{sheet.style.transform='';}currentY=0;});
 }
 
+/* ============================================================
+   MATCH DETAIL
+============================================================ */
 function openMatchDetail(matchId){
   const m=getMatch(matchId);if(!m)return;
   const home=getTeam(m.homeId),away=getTeam(m.awayId);
@@ -650,6 +806,9 @@ function openMatchDetail(matchId){
     ${done&&state.isAdmin?`<button class="btn btn-danger btn-block" data-action="delete-result" data-id="${m.id}">Eliminar resultado</button>`:''}`);
 }
 
+/* ============================================================
+   RESULT EDITOR
+============================================================ */
 function openResultEditor(matchId){
   const m=getMatch(matchId);if(!m)return;
   const home=getTeam(m.homeId),away=getTeam(m.awayId);
@@ -662,14 +821,17 @@ function openResultEditor(matchId){
       <div class="score-side">${teamBadge(away,56,true)}<div class="score-side-name">${esc(shortName(away))}</div><input class="score-input" id="score-away" type="number" inputmode="numeric" min="0" max="99" value="${r[1]}"></div>
     </div>
     <div class="scorers-box">
-      <div class="scorers-box-label">⚽ Goleadores (opcional)</div>
-      <div><div class="scorers-team-row"><span class="scorers-team-name">${esc(shortName(home))}</span></div><input class="scorers-input" id="scorers-home" type="text" placeholder="Ej: Juan 23', Pedro 45'" value="${esc(sc.home)}"></div>
+      <div class="scorers-box-label">⚽ Goleadores (opcional) · separa con comas</div>
+      <div><div class="scorers-team-row"><span class="scorers-team-name">${esc(shortName(home))}</span></div><input class="scorers-input" id="scorers-home" type="text" placeholder="Ej: Juan 23', Pedro 45', Juan 67'" value="${esc(sc.home)}"></div>
       <div><div class="scorers-team-row"><span class="scorers-team-name">${esc(shortName(away))}</span></div><input class="scorers-input" id="scorers-away" type="text" placeholder="Ej: Carlos 12'" value="${esc(sc.away)}"></div>
     </div>
     <button class="btn btn-primary btn-block" data-action="save-result" data-id="${m.id}">Guardar resultado</button>`);
   setTimeout(()=>{['score-home','score-away'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('focus',()=>el.select());});},350);
 }
 
+/* ============================================================
+   TEAM DETAIL
+============================================================ */
 function openTeamDetail(teamId){
   const cat=currentCat();const team=getTeam(teamId);
   const table=computeStandings(cat.id,'fase1');
@@ -705,8 +867,12 @@ function openTeamDetail(teamId){
     ${nextHtml}${historyHtml}`);
 }
 
+/* ============================================================
+   ACTIONS
+============================================================ */
 function setCategory(id){if(!catById(id))return;state.currentCategory=id;save();render();}
 function setTab(id){state.currentTab=id;save();render();}
+
 async function saveResult(matchId){
   const h=parseInt(document.getElementById('score-home').value,10);
   const a=parseInt(document.getElementById('score-away').value,10);
@@ -716,51 +882,41 @@ async function saveResult(matchId){
   const sch=document.getElementById('scorers-home').value.trim();
   const sca=document.getElementById('scorers-away').value.trim();
 
-  // 1. Guardar localmente (para funcionar sin internet)
+  // 1. Guardar local
   state.results[matchId]=[h,a];
   if(sch||sca)state.scorers[matchId]={home:sch,away:sca};
   else delete state.scorers[matchId];
   save();closeSheet();render();
-  toast('Guardado localmente','ok');
+  toast('Guardado local','ok');
 
-  // 2. Enviar al servidor (para que todos lo vean)
-  try {
-    await fetch(`${API_URL}/api/resultado`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        matchId,
-        home: h,
-        away: a,
-        scorers: { home: sch, away: sca }
-      })
-    });
+  // 2. Enviar al servidor
+  try{
+    await pushResultToServer(matchId,h,a,{home:sch,away:sca});
     toast('Sincronizado con la nube','ok');
-  } catch (e) {
-    console.warn('Sin conexión al servidor', e);
-    toast('Guardado solo localmente','err');
+  }catch(e){
+    console.warn('Sin conexión',e);
+    toast('Guardado solo local (sin nube)','err');
   }
 }
+
 async function deleteResult(matchId){
   if(!state.results[matchId])return;
   delete state.results[matchId];
   delete state.scorers[matchId];
   save();closeSheet();render();
-  toast('Resultado eliminado localmente');
-
-  try {
-    await fetch(`${API_URL}/api/resultado/${matchId}`, { method: 'DELETE' });
+  toast('Eliminado local');
+  try{
+    await deleteResultFromServer(matchId);
     toast('Eliminado en la nube','ok');
-  } catch (e) {
-    toast('Eliminado solo localmente','err');
+  }catch(e){
+    toast('Eliminado solo local','err');
   }
 }
+
 async function shareTournament(){
   const base=(state.tournament.publicUrl||PUBLIC_URL).trim().replace(/\/$/,'');
-  const data={t:state.tournament.name,s:state.tournament.season,r:state.results,g:state.scorers};
-  const enc=encodeShareData(data);
-  const url=`${base}/torneo.html#d=${enc}`;
-  const text=`🏆 ${state.tournament.name} · Temporada ${state.tournament.season}\n\nMira la tabla, resultados y próximos partidos:\n${url}`;
+  const url=`${base}/torneo.html`;
+  const text=`🏆 ${state.tournament.name} · Temporada ${state.tournament.season}\n\nMira la tabla, goleadores y resultados en vivo:\n${url}`;
   try{
     if(navigator.share){await navigator.share({title:state.tournament.name,text,url});}
     else{await navigator.clipboard.writeText(text);toast('Enlace copiado','ok');}
@@ -772,17 +928,81 @@ async function shareTournament(){
 }
 async function copyLink(){
   const base=(state.tournament.publicUrl||PUBLIC_URL).trim().replace(/\/$/,'');
-  const data={t:state.tournament.name,s:state.tournament.season,r:state.results,g:state.scorers};
-  const enc=encodeShareData(data);
-  const url=`${base}/torneo.html#d=${enc}`;
+  const url=`${base}/torneo.html`;
   try{await navigator.clipboard.writeText(url);toast('Enlace copiado','ok');}
   catch{toast('No se pudo copiar','err');}
 }
+
+/* ============================================================
+   ADMIN CON PIN
+============================================================ */
 function toggleAdmin(){
-  if(state.isAdmin){state.isAdmin=false;save();render();toast('Modo organizador desactivado');return;}
-  openSheet(`<div class="sheet-head"><div class="sheet-title">Modo organizador</div><button class="sheet-close" data-action="close-sheet">✕</button></div><p style="color:var(--text-2);font-size:13.5px;line-height:1.5">Activa el modo organizador para registrar resultados, editar equipos y gestionar el torneo.</p><button class="btn btn-primary btn-block" data-action="confirm-admin">Activar</button>`);
+  if(state.isAdmin){
+    state.isAdmin=false;save();render();
+    toast('Modo organizador desactivado');
+    return;
+  }
+  // Si no hay PIN configurado → pedir que lo cree
+  if(!state.adminPin){
+    openSheet(`<div class="sheet-head"><div class="sheet-title">Crear PIN de organizador</div><button class="sheet-close" data-action="close-sheet">✕</button></div>
+    <p style="color:var(--text-2);font-size:13.5px;line-height:1.5;margin-bottom:14px">Es la primera vez que activas el modo organizador. Crea un PIN de 4 dígitos que necesitarás cada vez que quieras gestionar el torneo.</p>
+    <input class="pin-input" id="pin-new" type="tel" inputmode="numeric" maxlength="6" placeholder="••••">
+    <input class="pin-input" id="pin-confirm" type="tel" inputmode="numeric" maxlength="6" placeholder="Repetir" style="margin-top:10px">
+    <button class="btn btn-primary btn-block" data-action="create-pin">Crear PIN</button>`);
+    setTimeout(()=>document.getElementById('pin-new')?.focus(),350);
+    return;
+  }
+  // Ya hay PIN → pedirlo
+  openSheet(`<div class="sheet-head"><div class="sheet-title">Introduce el PIN</div><button class="sheet-close" data-action="close-sheet">✕</button></div>
+  <p style="color:var(--text-2);font-size:13.5px;line-height:1.5;margin-bottom:14px">Introduce el PIN para activar el modo organizador.</p>
+  <input class="pin-input" id="pin-check" type="tel" inputmode="numeric" maxlength="6" placeholder="••••">
+  <button class="btn btn-primary btn-block" data-action="verify-pin">Desbloquear</button>`);
+  setTimeout(()=>document.getElementById('pin-check')?.focus(),350);
 }
-function confirmAdmin(){state.isAdmin=true;save();closeSheet();render();toast('Modo organizador activado','ok');}
+
+function createPin(){
+  const a=document.getElementById('pin-new').value.trim();
+  const b=document.getElementById('pin-confirm').value.trim();
+  if(!/^\d{4,6}$/.test(a)){toast('El PIN debe tener 4-6 dígitos','err');return;}
+  if(a!==b){toast('Los PIN no coinciden','err');return;}
+  state.adminPin=a;
+  state.isAdmin=true;
+  save();closeSheet();render();
+  toast('PIN creado · Bienvenido','ok');
+}
+
+function verifyPin(){
+  const p=document.getElementById('pin-check').value.trim();
+  if(p!==state.adminPin){toast('PIN incorrecto','err');return;}
+  state.isAdmin=true;
+  save();closeSheet();render();
+  toast('Modo organizador activado','ok');
+}
+
+function changePin(){
+  openSheet(`<div class="sheet-head"><div class="sheet-title">Cambiar PIN</div><button class="sheet-close" data-action="close-sheet">✕</button></div>
+  <p style="color:var(--text-2);font-size:13.5px;line-height:1.5;margin-bottom:14px">Introduce el PIN actual y el nuevo PIN.</p>
+  <input class="pin-input" id="pin-old" type="tel" inputmode="numeric" maxlength="6" placeholder="PIN actual">
+  <input class="pin-input" id="pin-new" type="tel" inputmode="numeric" maxlength="6" placeholder="Nuevo PIN" style="margin-top:10px">
+  <input class="pin-input" id="pin-confirm" type="tel" inputmode="numeric" maxlength="6" placeholder="Repetir nuevo" style="margin-top:10px">
+  <button class="btn btn-primary btn-block" data-action="save-pin">Guardar</button>`);
+}
+
+function saveNewPin(){
+  const old=document.getElementById('pin-old').value.trim();
+  const a=document.getElementById('pin-new').value.trim();
+  const b=document.getElementById('pin-confirm').value.trim();
+  if(old!==state.adminPin){toast('PIN actual incorrecto','err');return;}
+  if(!/^\d{4,6}$/.test(a)){toast('El PIN debe tener 4-6 dígitos','err');return;}
+  if(a!==b){toast('Los PIN no coinciden','err');return;}
+  state.adminPin=a;
+  save();closeSheet();
+  toast('PIN actualizado','ok');
+}
+
+/* ============================================================
+   EDICIÓN TORNEO / EQUIPOS / RESET
+============================================================ */
 function editTournament(){
   const t=state.tournament;
   openSheet(`<div class="sheet-head"><div class="sheet-title">Información del torneo</div><button class="sheet-close" data-action="close-sheet">✕</button></div>
@@ -844,9 +1064,26 @@ function addTeam(){
   save();closeSheet();render();toast('Equipo añadido','ok');
 }
 function resetTournament(){
-  openSheet(`<div class="sheet-head"><div class="sheet-title">Reiniciar torneo</div><button class="sheet-close" data-action="close-sheet">✕</button></div><p style="color:var(--text-2);font-size:13.5px;line-height:1.5">Se eliminarán todos los resultados y equipos personalizados. Los equipos y el calendario por defecto se restaurarán.</p><button class="btn btn-danger btn-block" data-action="confirm-reset">Sí, reiniciar</button>`);
+  openSheet(`<div class="sheet-head"><div class="sheet-title">Reiniciar torneo</div><button class="sheet-close" data-action="close-sheet">✕</button></div><p style="color:var(--text-2);font-size:13.5px;line-height:1.5">Se eliminarán todos los resultados locales Y los del servidor. Esta acción no se puede deshacer.</p><button class="btn btn-danger btn-block" data-action="confirm-reset">Sí, reiniciar todo</button>`);
 }
-function confirmReset(){state=defaultState();localStorage.removeItem(STORAGE_KEY);closeSheet();render();toast('Torneo reiniciado');}
+async function confirmReset(){
+  state=defaultState();
+  localStorage.removeItem(STORAGE_KEY);
+  for(const k of OLD_KEYS) localStorage.removeItem(k);
+  try{
+    await fetch(`${API_URL}/api/reset`,{method:'POST'});
+    toast('Torneo reiniciado en todas partes','ok');
+  }catch(e){
+    toast('Reiniciado solo local','err');
+  }
+  closeSheet();render();
+}
+async function syncNow(){
+  toast('Sincronizando...');
+  const ok=await loadFromServer();
+  if(ok) toast('Sincronizado','ok');
+  else toast('Sin conexión al servidor','err');
+}
 
 let toastTimer;
 function toast(msg,kind){
@@ -857,6 +1094,9 @@ function toast(msg,kind){
   toastTimer=setTimeout(()=>el.classList.remove('show'),2200);
 }
 
+/* ============================================================
+   EVENTS
+============================================================ */
 function bindEvents(){
   document.addEventListener('click',e=>{
     const el=e.target.closest('[data-action]');
@@ -874,7 +1114,10 @@ function bindEvents(){
       case 'share':shareTournament();break;
       case 'copy-link':copyLink();break;
       case 'toggle-admin':toggleAdmin();break;
-      case 'confirm-admin':confirmAdmin();break;
+      case 'create-pin':createPin();break;
+      case 'verify-pin':verifyPin();break;
+      case 'change-pin':changePin();break;
+      case 'save-pin':saveNewPin();break;
       case 'edit-tournament':editTournament();break;
       case 'save-tournament':saveTournament();break;
       case 'open-teams-admin':openTeamsAdmin();break;
@@ -884,37 +1127,31 @@ function bindEvents(){
       case 'add-team':addTeam();break;
       case 'reset-tournament':resetTournament();break;
       case 'confirm-reset':confirmReset();break;
+      case 'sync-now':syncNow();break;
     }
   });
   $('#share-btn').addEventListener('click',shareTournament);
   document.addEventListener('keydown',e=>{
-    if(e.key==='Enter'&&(e.target.id==='score-home'||e.target.id==='score-away')){
-      const btn=document.querySelector('[data-action="save-result"]');
-      if(btn)btn.click();
+    if(e.key==='Enter'){
+      const saveBtn=document.querySelector('[data-action="save-result"]');
+      if(saveBtn&&(e.target.id==='score-home'||e.target.id==='score-away')){saveBtn.click();return;}
+      const verifyBtn=document.querySelector('[data-action="verify-pin"]');
+      if(verifyBtn&&e.target.id==='pin-check'){verifyBtn.click();return;}
+      const createBtn=document.querySelector('[data-action="create-pin"]');
+      if(createBtn&&(e.target.id==='pin-new'||e.target.id==='pin-confirm')){createBtn.click();return;}
     }
   });
 }
 
-  async function loadFromServer(){
-  try{
-    const r = await fetch(`${API_URL}/api/torneo`);
-    if(!r.ok) return;
-    const data = await r.json();
-    if(data.results) state.results = data.results;
-    if(data.scorers) state.scorers = data.scorers;
-    save();
-    render();
-    console.log('Datos sincronizados desde el servidor');
-  }catch(e){
-    console.warn('No se pudo conectar al servidor, usando datos locales', e);
-  }
-}
 function init(){
   load();
+  save();
   render();
   bindEvents();
-  loadFromServer(); // <-- Añade esta línea
+  loadFromServer(); // sincroniza al abrir si hay internet
 }
+init();
+})();
 </script>
 </body>
 </html>
